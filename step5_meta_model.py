@@ -4,80 +4,68 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score, precision_score
 import matplotlib.pyplot as plt
 
-# 1. Wczytaj "plik od kolegów"
+# 1. Wczytaj dane
 df = pd.read_csv('colleagues_predictions.csv', index_col=0, parse_dates=True)
 
-# 2. LABELING (Oceniamy pracę kolegów)
-
-# Krok A: Jaki sygnał daje ich model?
-# Jeśli Predicted > Prev_Close -> 1 (KUPUJ/WZROST)
-# Jeśli Predicted < Prev_Close -> -1 (SPRZEDAJ/SPADEK)
+# 2. Labeling
 df['Signal'] = np.where(df['Predicted_Close'] > df['Prev_Close'], 1, -1)
-
-# Krok B: Czy mieli rację? (Tworzenie Targetu dla Meta-Modelu)
-# Obliczamy faktyczny kierunek rynku
 df['Actual_Direction'] = np.where(df['Actual_Close'] > df['Prev_Close'], 1, -1)
 
-# Meta_Label: 1 jeśli Signal == Actual_Direction, 0 jeśli się pomylili
+# Target: 1 jeśli mieli rację, 0 jeśli błąd
 df['Meta_Target'] = (df['Signal'] == df['Actual_Direction']).astype(int)
 
-print("Statystyki modelu kolegów (przed filtrem):")
-print(f"Skuteczność kierunkowa (Accuracy): {df['Meta_Target'].mean():.2%}")
-
-# 3. FEATURE ENGINEERING DLA META-MODELU
-# Na czym Twój model ma się uczyć filtrowania?
-# Używamy cech, które już są w pliku (RSI, ATR, Rolling_Std)
-# Dodajemy: Pewność siebie modelu (jak dużą zmianę przewiduje?)
+# 3. Feature Engineering dla Meta-Modelu
+# Używamy VIX, który dodaliśmy w kroku 4!
 df['Model_Confidence'] = abs(df['Predicted_Close'] - df['Prev_Close']) / df['Prev_Close']
 
-meta_features = ['RSI', 'ATR', 'Rolling_Std', 'Model_Confidence']
+# Cechy, które wchodzą do Meta-Modelu
+meta_features = ['RSI', 'ATR', 'VIX', 'Dist_SMA', 'Model_Confidence']
 X_meta = df[meta_features]
 y_meta = df['Meta_Target']
 
-# 4. TRENING TWOJEGO FILTRA
-# Dzielimy te wyniki na pół (uczymy się na pierwszej połowie testu kolegów, testujemy na drugiej)
+# 4. Trening
 split = int(len(df) * 0.5)
 X_m_train, X_m_test = X_meta.iloc[:split], X_meta.iloc[split:]
 y_m_train, y_m_test = y_meta.iloc[:split], y_meta.iloc[split:]
 
 print("\nTrening Meta-Modelu (Random Forest)...")
-# Random Forest jest świetny jako Meta-Model
-meta_model = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
+# Zmniejszamy min_samples_leaf, żeby model był bardziej agresywny
+meta_model = RandomForestClassifier(n_estimators=200, max_depth=5, min_samples_leaf=5, random_state=42)
 meta_model.fit(X_m_train, y_m_train)
 
-# 5. EWALUACJA
-# Meta-Model mówi: 1 (Przepuść sygnał, jest bezpieczny), 0 (Zablokuj, model kłamie)
-meta_preds = meta_model.predict(X_m_test)
+# 5. Feature Importance (Co jest ważne?)
+importances = meta_model.feature_importances_
+feat_importances = pd.Series(importances, index=X_m_test.columns)
+print("\n--- CO JEST WAŻNE DLA FILTRA? ---")
+print(feat_importances.sort_values(ascending=False))
 
-print("\n--- WYNIKI TWOJEGO MODUŁU ---")
+# 6. Predykcja z niższym progiem (Soft Voting)
+probs = meta_model.predict_proba(X_m_test)[:, 1]
+# Domyślnie jest 0.5. Zniżamy do 0.52 (lekki filtr) lub podwyższamy. 
+# Jeśli filtr nic nie puszczał, to znaczy że rzadko był pewien > 0.5.
+threshold = 0.52 
+meta_preds = (probs > threshold).astype(int)
+
+print(f"\n--- WYNIKI (Próg pewności: {threshold}) ---")
+print(f"Ile transakcji przepuścił filtr: {sum(meta_preds)} z {len(meta_preds)}")
 print(classification_report(y_m_test, meta_preds))
 
-# Sprawdźmy precyzję dla klasy 1 (kiedy mówisz "TAK", czy masz rację?)
-prec = precision_score(y_m_test, meta_preds)
-print(f"Precyzja Twojego filtra: {prec:.2%}")
-if prec > df['Meta_Target'].mean():
-    print("SUKCES! Twój filtr poprawia wyniki modelu bazowego.")
-else:
-    print("UWAGA: Filtr wymaga dostrojenia (więcej danych/lepsze cechy).")
-
-# 6. Symulacja Zysków (Equity Curve)
+# 7. Wykres
 test_data = df.iloc[split:].copy()
 test_data['Meta_Filter'] = meta_preds
-
-# Obliczamy zwrot z tradingu (prosty: kupujemy na otwarciu, sprzedajemy na zamknięciu)
-# Uproszczenie: zwrot to (Actual - Prev) / Prev * Sygnał
 test_data['Return'] = (test_data['Actual_Close'] - test_data['Prev_Close']) / test_data['Prev_Close']
-test_data['Strategy_Base'] = test_data['Return'] * test_data['Signal'] # Bierzemy wszystko
-test_data['Strategy_Meta'] = test_data['Strategy_Base'] * test_data['Meta_Filter'] # Bierzemy tylko potwierdzone
 
-# Skumulowany zysk
+# Symulacja
+test_data['Strategy_Base'] = test_data['Return'] * test_data['Signal']
+test_data['Strategy_Meta'] = test_data['Strategy_Base'] * test_data['Meta_Filter']
+
 test_data['Equity_Base'] = (1 + test_data['Strategy_Base']).cumprod()
 test_data['Equity_Meta'] = (1 + test_data['Strategy_Meta']).cumprod()
 
 plt.figure(figsize=(10, 6))
-plt.plot(test_data['Equity_Base'], label='RegLin (Bez Filtra)', color='red', alpha=0.6)
-plt.plot(test_data['Equity_Meta'], label='Meta-Labeling (Z Meta-Filtrem)', color='green', linewidth=2)
-plt.title('Porównanie Kapitału: Regresja vs Meta-Labeling')
+plt.plot(test_data['Equity_Base'], label='VAM (Base)', color='red', alpha=0.5)
+plt.plot(test_data['Equity_Meta'], label='Kuba (Meta-Filter)', color='green', linewidth=2)
+plt.title('Porównanie Strategii (Z VIX i danymi od 2018)')
 plt.legend()
 plt.grid(True)
-plt.show() # Pokaże wykres, który wrzucisz do prezentacji
+plt.show()

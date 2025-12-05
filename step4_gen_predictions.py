@@ -6,18 +6,32 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 import numpy as np
 
-# 1. Więcej danych! (2020 zamiast 2024)
-print("Pobieranie danych...")
-df = yf.download('AAPL', start='2020-01-01', auto_adjust=False)
-df.columns = df.columns.get_level_values(0)
+# 1. Pobieramy WIĘCEJ danych (od 2018) + VIX (Indeks Strachu)
+print("Pobieranie danych (AAPL + VIX)...")
+df = yf.download('AAPL', start='2018-01-01', auto_adjust=False)
+# Spłaszczamy MultiIndex
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.get_level_values(0)
 
-# 2. Features
+# Pobieramy VIX (Context)
+vix = yf.download('^VIX', start='2018-01-01', auto_adjust=False)
+if isinstance(vix.columns, pd.MultiIndex):
+    vix.columns = vix.columns.get_level_values(0)
+
+# 2. Feature Engineering
 df['RSI'] = df.ta.rsi(length=14)
-df['SMA_20'] = df.ta.sma(length=20)
+df['SMA_50'] = df.ta.sma(length=50)
 df['ATR'] = df.ta.atr(length=14)
-# Dodajemy VIX (Indeks strachu) - WAŻNE dla Meta-Modelu
-# Pobieramy osobno i łączymy, ale na razie uprośćmy: bazujemy na zmienności Apple
-df['Rolling_Std'] = df['Close'].pct_change().rolling(20).std()
+
+# Dołączamy VIX do danych Apple (fill forward na wypadek dziur)
+df['VIX'] = vix['Close']
+df['VIX'] = df['VIX'].ffill()
+
+# Feature: Czy VIX jest wysoki? (Powyżej 20 to strach, powyżej 30 to panika)
+df['VIX_High'] = (df['VIX'] > 25).astype(int)
+
+# Feature: Odległość od średniej (Mean Reversion)
+df['Dist_SMA'] = (df['Close'] - df['SMA_50']) / df['SMA_50']
 
 for lag in [1, 2, 3, 5]:
     df[f'Close_Lag_{lag}'] = df['Close'].shift(lag)
@@ -25,30 +39,28 @@ for lag in [1, 2, 3, 5]:
 df['Target'] = df['Close'].shift(-1)
 df.dropna(inplace=True)
 
-# 3. Podział
-feature_cols = [col for col in df.columns if col not in ['Target', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+# 3. Podział Chronologiczny
+feature_cols = ['RSI', 'ATR', 'VIX', 'Dist_SMA', 'Close_Lag_1', 'Close_Lag_2', 'Close_Lag_3', 'Close_Lag_5']
 X = df[feature_cols]
 y = df['Target']
 
-# Bez shuffle, żeby zachować chronologię!
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+# Bierzemy ostatni rok jako test
+split_idx = int(len(df) * 0.8)
+X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
-# 4. Trening Modelu Bazowego (Udajemy kolegów)
+# 4. Trening Modelu Bazowego
 print("Trening modelu regresyjnego (XGBoost)...")
-model = XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.05)
+# Zwiększamy moc modelu, żeby miał chociaż 51% skuteczności
+model = XGBRegressor(n_estimators=200, max_depth=4, learning_rate=0.05, random_state=42)
 model.fit(X_train, y_train)
 
-# 5. Generowanie predykcji i ZAPIS DO PLIKU
-# Tworzymy DataFrame, który symuluje plik od kolegów
+# 5. Generowanie wyników
 results = X_test.copy()
 results['Actual_Close'] = y_test
 results['Predicted_Close'] = model.predict(X_test)
-
-# Dodajemy oryginalną cenę z dnia wczorajszego (Close_Lag_1), żeby wiedzieć czy model przewiduje wzrost czy spadek
-# (Bo X_test ma znormalizowane dane lub lagi, musimy mieć punkt odniesienia)
+# Ważne: Musimy znać cenę z "wczoraj" dla tego wiersza (czyli Close_Lag_1)
 results['Prev_Close'] = results['Close_Lag_1'] 
 
 results.to_csv('colleagues_predictions.csv')
-print(f"\nSukces! Zapisano wyniki do 'colleagues_predictions.csv'.")
-print(f"MAE modelu kolegów: {mean_absolute_error(y_test, results['Predicted_Close']):.2f}")
-print("Teraz odpal step5_meta_model.py")
+print(f"Zapisano nowe wyniki. VIX dodany. Zakres danych: {len(df)} dni.")
