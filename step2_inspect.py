@@ -3,7 +3,7 @@ import pandas_ta as ta
 import yfinance as yf
 
 # 1. Pobierz dane
-df = yf.download('AAPL', start='2024-01-01', auto_adjust=False)
+df = yf.download('AAPL', start='2000-01-01', auto_adjust=False)
 df.columns = df.columns.get_level_values(0)
 
 # 2. Policz wskaźniki
