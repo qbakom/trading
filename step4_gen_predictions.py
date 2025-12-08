@@ -8,13 +8,13 @@ import numpy as np
 
 # 1. Pobieramy WIĘCEJ danych (od 2018) + VIX (Indeks Strachu)
 print("Pobieranie danych (AAPL + VIX)...")
-df = yf.download('AAPL', start='2018-01-01', auto_adjust=False)
+df = yf.download('AAPL', start='2000-01-01', auto_adjust=False)
 # Spłaszczamy MultiIndex
 if isinstance(df.columns, pd.MultiIndex):
     df.columns = df.columns.get_level_values(0)
 
 # Pobieramy VIX (Context)
-vix = yf.download('^VIX', start='2018-01-01', auto_adjust=False)
+vix = yf.download('^VIX', start='2000-01-01', auto_adjust=False)
 if isinstance(vix.columns, pd.MultiIndex):
     vix.columns = vix.columns.get_level_values(0)
 
@@ -35,6 +35,8 @@ vix = data['^VIX']['Close'].copy()
 df['RSI'] = df.ta.rsi(length=14)
 df['SMA_20'] = df.ta.sma(length=20)
 df['ATR'] = df.ta.atr(length=14)
+df['SMA_50'] = df.ta.sma(length=50)
+df['Dist_SMA'] = (df['Close'] - df['SMA_50']) / df['SMA_50']
 
 # Dołączamy VIX jako zewnętrzną cechę (Feature)
 df['VIX'] = vix
