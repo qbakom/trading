@@ -68,4 +68,9 @@ plt.plot(test_data['Equity_Meta'], label='Kuba (Meta-Filter)', color='green', li
 plt.title('Porównanie Strategii (Z VIX i danymi od 2018)')
 plt.legend()
 plt.grid(True)
+<<<<<<< Updated upstream
 plt.show()
+=======
+plt.savefig('meta_model_comparison.png', dpi=300, bbox_inches='tight')
+print("\nWykres zapisany jako 'meta_model_comparison.png'")
+>>>>>>> Stashed changes

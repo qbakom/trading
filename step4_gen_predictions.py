@@ -22,25 +22,38 @@ if isinstance(vix.columns, pd.MultiIndex):
 df['RSI'] = df.ta.rsi(length=14)
 df['SMA_50'] = df.ta.sma(length=50)
 df['ATR'] = df.ta.atr(length=14)
+# Dodajemy VIX (Indeks strachu) - WAŻNE dla Meta-Modelu
+print("Pobieranie danych (AAPL + VIX)...")
+tickers = ['AAPL', '^VIX']
+data = yf.download(tickers, start='2000-01-01', group_by='ticker', auto_adjust=False)
 
-# Dołączamy VIX do danych Apple (fill forward na wypadek dziur)
-df['VIX'] = vix['Close']
-df['VIX'] = df['VIX'].ffill()
+# Rozdzielamy dane
+df = data['AAPL'].copy()
+vix = data['^VIX']['Close'].copy()
 
-# Feature: Czy VIX jest wysoki? (Powyżej 20 to strach, powyżej 30 to panika)
-df['VIX_High'] = (df['VIX'] > 25).astype(int)
+# Feature Engineering dla AAPL
+df['RSI'] = df.ta.rsi(length=14)
+df['SMA_20'] = df.ta.sma(length=20)
+df['ATR'] = df.ta.atr(length=14)
 
-# Feature: Odległość od średniej (Mean Reversion)
-df['Dist_SMA'] = (df['Close'] - df['SMA_50']) / df['SMA_50']
+# Dołączamy VIX jako zewnętrzną cechę (Feature)
+df['VIX'] = vix
+df['VIX'] = df['VIX'].ffill() # Uzupełniamy braki
+
+# Feature: Czy jest panika?
+df['Panic_Mode'] = (df['VIX'] > 25).astype(int)
+
+# Feature: Zmienność ceny (Rolling Standard Deviation)
+df['Rolling_Std'] = df['Close'].rolling(window=20).std()
 
 for lag in [1, 2, 3, 5]:
     df[f'Close_Lag_{lag}'] = df['Close'].shift(lag)
 
 df['Target'] = df['Close'].shift(-1)
 df.dropna(inplace=True)
-
-# 3. Podział Chronologiczny
-feature_cols = ['RSI', 'ATR', 'VIX', 'Dist_SMA', 'Close_Lag_1', 'Close_Lag_2', 'Close_Lag_3', 'Close_Lag_5']
+# ----------------------------------------
+# Define X and y
+feature_cols = [col for col in df.columns if col not in ['Target', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
 X = df[feature_cols]
 y = df['Target']
 

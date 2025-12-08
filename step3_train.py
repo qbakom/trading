@@ -7,7 +7,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 import numpy as np
 
 # Przygotuj dane (skopiuj z step1.py)
-df = yf.download('AAPL', start='2024-01-01', auto_adjust=False)
+df = yf.download('AAPL', start='2000-01-01', auto_adjust=False)
 df.columns = df.columns.get_level_values(0)
 df['RSI'] = df.ta.rsi(length=14)
 df['SMA_20'] = df.ta.sma(length=20)
