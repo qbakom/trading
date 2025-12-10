@@ -5,6 +5,11 @@ from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 import numpy as np
+import joblib
+import os
+
+# Create stages directory
+os.makedirs('stages', exist_ok=True)
 
 # 1. Pobieramy WIĘCEJ danych (od 2018) + VIX (Indeks Strachu)
 print("Pobieranie danych (AAPL + VIX)...")
@@ -48,6 +53,17 @@ df['Panic_Mode'] = (df['VIX'] > 25).astype(int)
 # Feature: Zmienność ceny (Rolling Standard Deviation)
 df['Rolling_Std'] = df['Close'].rolling(window=20).std()
 
+# Feature: VIX Slope (Is fear rising?)
+df['VIX_Slope'] = df['VIX'].diff(5)
+
+# Feature: Bollinger Bands Width (Volatility)
+bb = df.ta.bbands(length=20, std=2)
+# pandas_ta returns columns like BBB_20_2.0_2.0 in this version
+df['BB_Width'] = bb['BBB_20_2.0_2.0']
+
+# Feature: RSI Distance from 50 (Trend Strength)
+df['RSI_Dist'] = abs(df['RSI'] - 50)
+
 for lag in [1, 2, 3, 5]:
     df[f'Close_Lag_{lag}'] = df['Close'].shift(lag)
 
@@ -77,5 +93,18 @@ results['Predicted_Close'] = model.predict(X_test)
 # Ważne: Musimy znać cenę z "wczoraj" dla tego wiersza (czyli Close_Lag_1)
 results['Prev_Close'] = results['Close_Lag_1'] 
 
-results.to_csv('colleagues_predictions.csv')
-print(f"Zapisano nowe wyniki. VIX dodany. Zakres danych: {len(df)} dni.")
+results.to_csv('stages/step4_predictions.csv')
+print(f"Zapisano nowe wyniki do 'stages/step4_predictions.csv'. VIX dodany. Zakres danych: {len(df)} dni.")
+
+# 6. Zapisz model i dane dla interpretowalności (step6)
+print("Zapisywanie modelu i danych dla step6...")
+joblib.dump(model, 'stages/step4_model_xgboost.joblib')
+data_step4 = {
+    'X_train': X_train,
+    'X_test': X_test,
+    'y_train': y_train,
+    'y_test': y_test,
+    'feature_cols': feature_cols
+}
+joblib.dump(data_step4, 'stages/step4_data.pkl')
+print("Zapisano 'stages/step4_model_xgboost.joblib' i 'stages/step4_data.pkl'")
