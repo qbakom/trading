@@ -33,7 +33,9 @@ def load_data(ticker='AAPL', start_date='2000-01-01', auto_adjust=False):
             pass
 
     # Alpha Vantage
-    api_key = "QD4BE7OCQT8DVK2Q"
+    api_key = os.getenv("ALPHAVANTAGE_API_KEY")
+    if not api_key:
+        raise ValueError("ALPHAVANTAGE_API_KEY not found in environment variables.")
     try:
         import urllib.request
         import io
