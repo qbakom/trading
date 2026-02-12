@@ -1,0 +1,14 @@
+*.txt
+*.csv
+!requirements.txt
+ml
+.venv
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints
+.vscode/
+.github/
+
+*.md
+!README.md
